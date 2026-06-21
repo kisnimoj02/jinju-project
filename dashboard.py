@@ -153,8 +153,8 @@ with tab1:
                 style_function=lambda x, wr=is_wr: {
                     "fillColor":   "#9b59b6" if wr else "#2c3e50",
                     "color":       "#c39bd3" if wr else "#4a4a6a",
-                    "weight":      2.5 if wr else 0.8,
-                    "fillOpacity": 0.40 if wr else 0.08,
+                    "weight":      3 if wr else 1,
+                    "fillOpacity": 0.55 if wr else 0.10,
                 },
                 tooltip=folium.Tooltip(f"{'🏠 원룸촌 | ' if is_wr else ''}{name}"),
             ).add_to(m)
