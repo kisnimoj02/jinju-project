@@ -1,4 +1,6 @@
 streamlit==1.45.0
+folium
+streamlit-folium
 plotly
 pandas
 numpy
