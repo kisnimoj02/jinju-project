@@ -47,10 +47,10 @@ BASE = Path(__file__).parent
 
 @st.cache_data
 def load_data():
-    spots    = pd.read_csv(BASE / "data/processed/vulnerable_spots.csv", encoding="utf-8-sig")
-    stats    = pd.read_csv(BASE / "data/processed/dong_stats.csv",       encoding="utf-8-sig")
-    cctv     = pd.read_csv(BASE / "data/processed/cctv_geocoded.csv",    encoding="utf-8-sig")
-    wonroom  = pd.read_csv(BASE / "data/processed/wonroom_area.csv",     encoding="utf-8-sig")
+    spots    = pd.read_csv(BASE / "vulnerable_spots.csv", encoding="utf-8-sig")
+    stats    = pd.read_csv(BASE / "dong_stats.csv",       encoding="utf-8-sig")
+    cctv     = pd.read_csv(BASE / "cctv_geocoded.csv",    encoding="utf-8-sig")
+    wonroom  = pd.read_csv(BASE / "wonroom_area.csv",     encoding="utf-8-sig")
     return spots, stats, cctv, wonroom
 
 spots, stats, cctv, wonroom = load_data()
