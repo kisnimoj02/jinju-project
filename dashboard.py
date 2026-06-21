@@ -6,6 +6,9 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import folium
+from folium.plugins import MarkerCluster, FastMarkerCluster
+from streamlit_folium import st_folium
 import plotly.express as px
 import plotly.graph_objects as go
 from pathlib import Path
@@ -63,7 +66,22 @@ def load_data():
     wonroom = pd.read_csv(BASE / "wonroom_area.csv",      encoding="utf-8-sig")
     return spots, stats, cctv, wonroom
 
+@st.cache_data
+def load_geojson():
+    url = "https://raw.githubusercontent.com/vuski/admdongkor/master/ver20230101/HangJeongDong_ver20230101.geojson"
+    try:
+        r = requests.get(url, timeout=15)
+        gj = r.json()
+        gj["features"] = [
+            f for f in gj["features"]
+            if str(f["properties"].get("adm_cd", "")).startswith("4817")
+        ]
+        return gj
+    except Exception:
+        return None
+
 spots, stats, cctv, wonroom = load_data()
+geojson = load_geojson()
 
 def extract_dong(address):
     if not isinstance(address, str):
@@ -87,9 +105,10 @@ with st.sidebar:
     selected_dong = st.multiselect("읍면동 필터", options=["전체"] + dong_list, default=["전체"])
     radius = st.slider("취약 지점 판단 반경 (m)", 50, 200, 100, step=10)
     st.markdown("---")
-    show_cctv       = st.checkbox("CCTV 위치 표시",  value=True)
-    show_complaints = st.checkbox("민원 위치 표시",  value=True)
-    show_vulnerable = st.checkbox("취약 지점 강조",  value=True)
+    show_polygon    = st.checkbox("원룸촌 구역 폴리곤", value=True)
+    show_cctv       = st.checkbox("CCTV 위치 표시",    value=True)
+    show_complaints = st.checkbox("민원 위치 표시",    value=True)
+    show_vulnerable = st.checkbox("취약 지점 강조",    value=True)
     st.markdown("---")
     st.markdown("**데이터 출처**")
     st.caption("· 경상남도 진주시 CCTV 위치정보")
@@ -139,68 +158,82 @@ st.markdown("<br>", unsafe_allow_html=True)
 tab1, tab2, tab3, tab4 = st.tabs(["🗺️ 인터랙티브 지도", "📊 통계 분석", "💡 CCTV 설치 시뮬레이션", "📋 취약 지점 목록"])
 
 # ════════════════════════════════════════════════════
-# TAB 1: 지도 (plotly mapbox - 빠름)
+# TAB 1: 지도 (folium + 클러스터링)
 # ════════════════════════════════════════════════════
 with tab1:
     st.markdown("### 민원 발생 × CCTV 분포 지도")
-    st.caption("🔴 취약 지점(사각지대)  🟡 일반 민원  🔵 CCTV 위치")
+    st.caption("🔴 취약 지점(사각지대)  🟡 일반 민원  🔵 CCTV(클러스터)  🟣 원룸촌 구역")
 
-    fig_map = go.Figure()
+    m = folium.Map(location=[35.18, 128.11], zoom_start=13, tiles="CartoDB dark_matter")
 
-    # CCTV 레이어
+    # ① 원룸촌 폴리곤
+    if show_polygon and geojson:
+        wonroom_dongs = set()
+        if "행정구역" in wonroom.columns:
+            wonroom_dongs = set(
+                wonroom[wonroom["원룸촌여부"] == 1]["행정구역"].apply(extract_dong)
+            )
+        for feature in geojson["features"]:
+            dong_name  = feature["properties"].get("adm_nm", "")
+            dong_short = extract_dong(dong_name)
+            is_wonroom = dong_short in wonroom_dongs
+            folium.GeoJson(
+                feature,
+                style_function=lambda x, wr=is_wonroom: {
+                    "fillColor":   "#9b59b6" if wr else "#2c3e50",
+                    "color":       "#9b59b6" if wr else "#4a4a6a",
+                    "weight":      2 if wr else 1,
+                    "fillOpacity": 0.35 if wr else 0.05,
+                },
+                tooltip=folium.Tooltip(f"{dong_name} {'🏠 원룸촌' if is_wonroom else ''}"),
+            ).add_to(m)
+
+    # ② CCTV — MarkerCluster로 묶기
     if show_cctv:
-        cctv_v = cctv.dropna(subset=["위도","경도"])
-        fig_map.add_trace(go.Scattermapbox(
-            lat=cctv_v["위도"], lon=cctv_v["경도"],
-            mode="markers",
-            marker=dict(size=6, color="#4b9eff", opacity=0.7),
+        cctv_cluster = MarkerCluster(
             name="CCTV",
-            text=cctv_v.get("설치장소", ""),
-            hovertemplate="📷 CCTV<br>%{text}<extra></extra>",
-        ))
+            options={"maxClusterRadius": 40, "disableClusteringAtZoom": 16}
+        ).add_to(m)
+        cctv_valid = cctv.dropna(subset=["위도","경도"])
+        for _, row in cctv_valid.iterrows():
+            folium.CircleMarker(
+                location=[row["위도"], row["경도"]],
+                radius=4, color="#4b9eff", fill=True, fill_opacity=0.7,
+                popup=f"CCTV: {row.get('설치장소','')}<br>목적: {row.get('목적','')}",
+            ).add_to(cctv_cluster)
 
-    # 일반 민원 레이어
+    # ③ 일반 민원 — CircleMarker (수가 적어서 클러스터 불필요)
     if show_complaints:
-        normal = filtered[(filtered["취약지점여부"] == 0)].dropna(subset=["lat","lng"])
-        fig_map.add_trace(go.Scattermapbox(
-            lat=normal["lat"], lon=normal["lng"],
-            mode="markers",
-            marker=dict(size=8, color="#ffa64d", opacity=0.8),
-            name="일반 민원",
-            text=normal.get("위반장소", ""),
-            hovertemplate="🟡 민원<br>%{text}<br>날짜: %{customdata}<extra></extra>",
-            customdata=normal.get("위반일자", ""),
-        ))
+        normal = filtered[filtered["취약지점여부"] == 0].dropna(subset=["lat","lng"])
+        for _, row in normal.iterrows():
+            folium.CircleMarker(
+                location=[row["lat"], row["lng"]],
+                radius=6, color="#ffa64d", fill=True, fill_opacity=0.8,
+                popup=(
+                    f"<b>민원</b><br>"
+                    f"주소: {row.get('위반장소','')}<br>"
+                    f"날짜: {row.get('위반일자','')}<br>"
+                    f"최근접 CCTV: {row.get('최근접CCTV거리(m)','')}m"
+                ),
+            ).add_to(m)
 
-    # 취약 지점 레이어
+    # ④ 취약 지점 — 강조 마커
     if show_vulnerable:
         vuln_v = vulnerable.dropna(subset=["lat","lng"])
-        fig_map.add_trace(go.Scattermapbox(
-            lat=vuln_v["lat"], lon=vuln_v["lng"],
-            mode="markers",
-            marker=dict(size=12, color="#ff4b4b", opacity=0.9),
-            name="⚠️ 사각지대",
-            text=vuln_v.get("위반장소", ""),
-            hovertemplate="⚠️ 사각지대<br>%{text}<br>최근접 CCTV: %{customdata}m<extra></extra>",
-            customdata=vuln_v.get("최근접CCTV거리(m)", ""),
-        ))
+        for _, row in vuln_v.iterrows():
+            folium.CircleMarker(
+                location=[row["lat"], row["lng"]],
+                radius=10, color="#ff4b4b", fill=True, fill_opacity=0.9,
+                popup=(
+                    f"<b>⚠️ 사각지대</b><br>"
+                    f"주소: {row.get('위반장소','')}<br>"
+                    f"날짜: {row.get('위반일자','')}<br>"
+                    f"최근접 CCTV: {row.get('최근접CCTV거리(m)','')}m"
+                ),
+            ).add_to(m)
 
-    fig_map.update_layout(
-        mapbox=dict(
-            style="carto-darkmatter",
-            center=dict(lat=35.18, lon=128.11),
-            zoom=12,
-        ),
-        paper_bgcolor="#0e1117",
-        plot_bgcolor="#0e1117",
-        margin=dict(l=0, r=0, t=0, b=0),
-        height=560,
-        legend=dict(
-            bgcolor="#1e2130", font=dict(color="white"),
-            x=0.01, y=0.99,
-        ),
-    )
-    st.plotly_chart(fig_map, use_container_width=True)
+    folium.LayerControl().add_to(m)
+    st_folium(m, width="100%", height=560, returned_objects=[])
 
 # ════════════════════════════════════════════════════
 # TAB 2: 통계 분석
@@ -243,9 +276,10 @@ with tab2:
         st.plotly_chart(fig2, use_container_width=True)
 
     st.markdown("#### 20대 인구 비율 vs 취약 건수 (원룸촌 일치 여부)")
-    scatter_data = dong_f.dropna(subset=["20대_비율(%)"])
-    scatter_data = scatter_data.copy()
-    scatter_data["원룸촌"] = scatter_data["원룸촌여부"].map({1.0:"원룸촌 ✅", 0.0:"비원룸촌"}).fillna("데이터없음")
+    scatter_data = dong_f.dropna(subset=["20대_비율(%)"]).copy()
+    scatter_data["원룸촌"] = scatter_data["원룸촌여부"].map(
+        {1.0:"원룸촌 ✅", 0.0:"비원룸촌"}
+    ).fillna("데이터없음")
     fig3 = px.scatter(
         scatter_data, x="20대_비율(%)", y="취약건수",
         size="민원건수", color="원룸촌",
@@ -303,38 +337,28 @@ with tab3:
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown("#### 신규 CCTV 설치 권장 위치")
 
-    fig_sim = go.Figure()
+    m3 = folium.Map(location=[35.18, 128.11], zoom_start=13, tiles="CartoDB dark_matter")
 
-    # 기존 취약 지점
-    fig_sim.add_trace(go.Scattermapbox(
-        lat=vuln_valid["lat"], lon=vuln_valid["lng"],
-        mode="markers",
-        marker=dict(size=8, color="#ff4b4b", opacity=0.7),
-        name="취약 지점",
-        text=vuln_valid.get("위반장소",""),
-        hovertemplate="⚠️ %{text}<extra></extra>",
-    ))
+    for _, row in vuln_valid.iterrows():
+        folium.CircleMarker(
+            location=[row["lat"], row["lng"]],
+            radius=6, color="#ff4b4b", fill=True, fill_opacity=0.7,
+            popup=f"취약 지점: {row.get('위반장소','')}",
+        ).add_to(m3)
 
-    # 신규 CCTV 권장 위치
     if not sim_df.empty:
-        fig_sim.add_trace(go.Scattermapbox(
-            lat=sim_df["lat"], lon=sim_df["lng"],
-            mode="markers+text",
-            marker=dict(size=18, color="#4bcc7a", opacity=0.9, symbol="circle"),
-            text=[f"📷{i+1}" for i in range(len(sim_df))],
-            textposition="middle center",
-            name="신규 CCTV 권장",
-            customdata=sim_df["커버건수"],
-            hovertemplate="📷 신규 CCTV<br>%{customdata}건 커버<extra></extra>",
-        ))
+        for i, row in sim_df.iterrows():
+            folium.Marker(
+                location=[row["lat"], row["lng"]],
+                popup=f"📷 신규 CCTV {i+1}번<br>커버 민원: {row['커버건수']}건",
+                icon=folium.Icon(color="green", icon="camera", prefix="fa"),
+            ).add_to(m3)
+            folium.Circle(
+                location=[row["lat"], row["lng"]],
+                radius=sim_radius, color="#4bcc7a", fill=True, fill_opacity=0.15,
+            ).add_to(m3)
 
-    fig_sim.update_layout(
-        mapbox=dict(style="carto-darkmatter", center=dict(lat=35.18, lon=128.11), zoom=12),
-        paper_bgcolor="#0e1117", plot_bgcolor="#0e1117",
-        margin=dict(l=0,r=0,t=0,b=0), height=480,
-        legend=dict(bgcolor="#1e2130", font=dict(color="white"), x=0.01, y=0.99),
-    )
-    st.plotly_chart(fig_sim, use_container_width=True)
+    st_folium(m3, width="100%", height=480, returned_objects=[])
 
     st.markdown("#### 📋 CCTV 설치 우선순위 목록")
     if not sim_df.empty:
