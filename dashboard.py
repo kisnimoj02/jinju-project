@@ -16,8 +16,8 @@ import re
 from math import radians, cos, sin, asin, sqrt
 
 st.set_page_config(
-    page_title="진주시 무단투기 CCTV 사각지대 분석",
-    page_icon="🗑️", layout="wide", initial_sidebar_state="expanded"
+    page_title="클린진주 — 무단투기 CCTV 사각지대 분석",
+    page_icon="🧹", layout="wide", initial_sidebar_state="expanded"
 )
 
 st.markdown("""
@@ -105,11 +105,11 @@ filtered["취약지점여부"] = (filtered["최근접CCTV거리(m)"] > radius).a
 vulnerable = filtered[filtered["취약지점여부"] == 1]
 
 # ── 타이틀 ──
-st.markdown("# 🗑️ 진주시 무단투기 × CCTV 사각지대 분석")
+st.markdown("# 🧹 클린진주 — 무단투기 × CCTV 사각지대 분석")
 st.markdown("""
 <div class="question-box">
   <h3>📌 핵심 의사결정 질문</h3>
-  <p>20대 1인가구 밀집 원룸촌에서 무단투기 민원이 집중되는 지점은 CCTV 사각지대와 일치하는가?<br>
+  <p>🧹 클린진주 — 20대 1인가구 밀집 원룸촌에서 무단투기 민원이 집중되는 지점은 CCTV 사각지대와 일치하는가?<br>
   → 데이터로 취약 지점을 특정하여 <b>CCTV 추가 설치 우선순위</b>를 제안한다.</p>
 </div>
 """, unsafe_allow_html=True)
