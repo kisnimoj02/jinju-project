@@ -1,5 +1,6 @@
 """
-진주시 무단투기 민원 × CCTV 사각지대 분석 대시보드
+진주시 원룸촌 무단투기 취약지역 분석 대시보드
+발표용으로 섹션명과 주석 구조를 정리한 버전
 """
 
 import streamlit as st
@@ -78,7 +79,7 @@ def haversine(lat1, lng1, lat2, lng2):
 
 dong_list = sorted([d for d in spots["읍면동"].unique() if d != "알수없음"])
 
-# ── 사이드바 ──
+# ── 발표/분석 설정 사이드바 ──
 with st.sidebar:
     st.markdown("## ⚙️ 보기 설정")
     st.markdown("---")
@@ -95,7 +96,7 @@ with st.sidebar:
     st.caption("· 경상남도 진주시 쓰레기 무단투기 신고정보")
     st.caption("· 행정동별 연령별 주민등록 인구현황")
 
-# ── 필터링 ──
+# ── 공통 분석 필터 적용 ──
 if "전체" in selected_dong or not selected_dong:
     filtered = spots.copy()
 else:
@@ -104,18 +105,17 @@ else:
 filtered["취약지점여부"] = (filtered["최근접CCTV거리(m)"] > radius).astype(int)
 vulnerable = filtered[filtered["취약지점여부"] == 1]
 
-# ── 타이틀 ──
-st.markdown("# 🧹 클린진주 — 무단투기 × CCTV 사각지대 분석")
+# ── 발표 오프닝: 제목과 문제 정의 ──
+st.markdown("# 🧹 클린진주 — 원룸촌 무단투기 취약지역 분석")
 st.markdown("""
 <div class="question-box">
-  <h3>📌 핵심 의사결정 질문</h3>
-  <p>🧹 클린진주 — 20대 1인가구 밀집 원룸촌에서 무단투기 민원이 집중되는 지점은 CCTV 사각지대와 일치하는가?<br>
-  → 데이터로 취약 지점을 특정하여 <b>CCTV 추가 설치 우선순위</b>를 제안한다.</p>
+  <h3>📌 프로젝트 한 줄 요약</h3>
+  <p>진주시 원룸촌 지역의 무단투기 민원 발생 위치와 CCTV 사각지대가 일치하는지 데이터로 검증하고, <b>CCTV 추가 설치 우선순위</b>를 제안합니다.</p>
 </div>
 """, unsafe_allow_html=True)
 st.markdown("---")
 
-# ── KPI ──
+# ── 발표 핵심 수치 KPI ──
 c1, c2, c3, c4 = st.columns(4)
 pct = round(len(vulnerable)/len(filtered)*100, 1) if len(filtered) > 0 else 0
 wonroom_vuln = 0
@@ -134,68 +134,13 @@ with c4:
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-tab1, tab2, tab3, tab4 = st.tabs(["🗺️ 인터랙티브 지도", "📊 통계 분석", "💡 CCTV 설치 시뮬레이션", "📋 취약 지점 목록"])
+tab1, tab2, tab3, tab4 = st.tabs(["📊 통계 분석", "📋 취약 지점 목록", "🗺️ 인터랙티브 지도", "💡 CCTV 설치 시뮬레이션"])
 
-# ════ TAB 1: 지도 ════
+
+# ════ TAB 1: 통계 분석 ════
 with tab1:
-    st.markdown("### 민원 발생 × CCTV 분포 지도")
-    st.caption("🔴 취약 지점  🟡 일반 민원  🔵 CCTV(클러스터)  🟣 원룸촌 구역")
-
-    m = folium.Map(location=[35.18, 128.10], zoom_start=13, tiles="CartoDB dark_matter")
-
-    # ① 원룸촌 폴리곤 (로컬 GeoJSON)
-    if show_polygon and geojson:
-        for feature in geojson["features"]:
-            is_wr = feature["properties"].get("wonroom", 0) == 1
-            name  = feature["properties"].get("name", "")
-            folium.GeoJson(
-                feature,
-                style_function=lambda x, wr=is_wr: {
-                    "fillColor":   "#9b59b6" if wr else "#2c3e50",
-                    "color":       "#c39bd3" if wr else "#4a4a6a",
-                    "weight":      3 if wr else 1,
-                    "fillOpacity": 0.55 if wr else 0.10,
-                },
-                tooltip=folium.Tooltip(f"{'🏠 원룸촌 | ' if is_wr else ''}{name}"),
-            ).add_to(m)
-
-    # ② CCTV 클러스터
-    if show_cctv:
-        cctv_cluster = MarkerCluster(
-            options={"maxClusterRadius": 40, "disableClusteringAtZoom": 16}
-        ).add_to(m)
-        for _, row in cctv.dropna(subset=["위도","경도"]).iterrows():
-            folium.CircleMarker(
-                location=[row["위도"], row["경도"]],
-                radius=4, color="#4b9eff", fill=True, fill_opacity=0.7,
-                popup=f"CCTV: {row.get('설치장소','')}<br>목적: {row.get('목적','')}",
-            ).add_to(cctv_cluster)
-
-    # ③ 일반 민원
-    if show_complaints:
-        for _, row in filtered[filtered["취약지점여부"]==0].dropna(subset=["lat","lng"]).iterrows():
-            folium.CircleMarker(
-                location=[row["lat"], row["lng"]],
-                radius=6, color="#ffa64d", fill=True, fill_opacity=0.8,
-                popup=f"<b>민원</b><br>{row.get('위반장소','')}<br>{row.get('위반일자','')}",
-            ).add_to(m)
-
-    # ④ 취약 지점
-    if show_vulnerable:
-        for _, row in vulnerable.dropna(subset=["lat","lng"]).iterrows():
-            folium.CircleMarker(
-                location=[row["lat"], row["lng"]],
-                radius=10, color="#ff4b4b", fill=True, fill_opacity=0.9,
-                popup=(f"<b>⚠️ 사각지대</b><br>{row.get('위반장소','')}<br>"
-                       f"{row.get('위반일자','')}<br>최근접 CCTV: {row.get('최근접CCTV거리(m)','')}m"),
-            ).add_to(m)
-
-    folium.LayerControl().add_to(m)
-    st_folium(m, width="100%", height=560, returned_objects=[])
-
-# ════ TAB 2: 통계 ════
-with tab2:
-    st.markdown("### 원인 분석: 왜 이 지역에 무단투기가 많은가?")
+    st.markdown("### 1) 통계 분석 — 데이터로 취약지역을 먼저 설명")
+    st.caption("발표 포인트: 전체 민원, 사각지대 비율, 원룸촌 집중 여부를 먼저 보여주세요.")
     st.markdown("""
     - 🏠 **1인가구·대학생 밀집** → 분리수거 인식 낮음, 야간 배달 쓰레기 증가
     - 📷 **CCTV 사각지대** → 감시 공백으로 인한 투기 유발
@@ -239,9 +184,83 @@ with tab2:
     st.plotly_chart(fig3, use_container_width=True)
     st.caption("💡 오른쪽 위로 갈수록 20대가 많고 사각지대도 많은 지역 → CCTV 추가 설치 최우선 대상")
 
-# ════ TAB 3: 시뮬레이션 ════
+
+# ════ TAB 2: 취약 지점 목록 ════
+with tab2:
+    st.markdown(f"### 2) 취약 지점 목록 — 반경 {radius}m 내 CCTV가 없는 민원 지점")
+    st.caption("발표 포인트: 실제 우선 조치 대상 주소를 보여주는 정책 실행용 목록입니다.")
+    vd = vulnerable[["위반장소","읍면동","위반일자","최근접CCTV거리(m)"]].copy()
+    vd = vd.sort_values("최근접CCTV거리(m)", ascending=False).reset_index(drop=True)
+    vd.index += 1; vd.columns = ["주소","읍면동","위반일자","최근접CCTV거리(m)"]
+    st.dataframe(vd, use_container_width=True, height=500)
+    st.markdown(f"**총 {len(vd)}건**")
+    csv = vd.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
+    st.download_button(label="CSV 다운로드", data=csv,
+                       file_name="vulnerable_spots_export.csv", mime="text/csv")
+
+# ════ TAB 3: 인터랙티브 지도 ════
 with tab3:
-    st.markdown("### 💡 CCTV 추가 설치 시뮬레이션")
+    st.markdown("### 3) 인터랙티브 지도 — 원룸촌과 사각지대가 겹치는지 시각적으로 확인")
+    st.caption("발표 포인트: 빨간 점(사각지대 민원)이 보라색 원룸촌 구역 안에 있는지 직접 짚어주세요.")
+    st.caption("🔴 취약 지점  🟡 일반 민원  🔵 CCTV(클러스터)  🟣 원룸촌 구역")
+
+    m = folium.Map(location=[35.18, 128.10], zoom_start=13, tiles="CartoDB dark_matter")
+
+    # ① 원룸촌 구역: 20대 인구 비율 상위 지역을 보라색 폴리곤으로 표시
+    if show_polygon and geojson:
+        for feature in geojson["features"]:
+            is_wr = feature["properties"].get("wonroom", 0) == 1
+            name  = feature["properties"].get("name", "")
+            folium.GeoJson(
+                feature,
+                style_function=lambda x, wr=is_wr: {
+                    "fillColor":   "#9b59b6" if wr else "#2c3e50",
+                    "color":       "#c39bd3" if wr else "#4a4a6a",
+                    "weight":      3 if wr else 1,
+                    "fillOpacity": 0.55 if wr else 0.10,
+                },
+                tooltip=folium.Tooltip(f"{'🏠 원룸촌 | ' if is_wr else ''}{name}"),
+            ).add_to(m)
+
+    # ② 기존 CCTV 분포: 현재 감시 인프라의 밀집도를 클러스터로 표시
+    if show_cctv:
+        cctv_cluster = MarkerCluster(
+            options={"maxClusterRadius": 40, "disableClusteringAtZoom": 16}
+        ).add_to(m)
+        for _, row in cctv.dropna(subset=["위도","경도"]).iterrows():
+            folium.CircleMarker(
+                location=[row["위도"], row["경도"]],
+                radius=4, color="#4b9eff", fill=True, fill_opacity=0.7,
+                popup=f"CCTV: {row.get('설치장소','')}<br>목적: {row.get('목적','')}",
+            ).add_to(cctv_cluster)
+
+    # ③ 일반 민원: 반경 기준 안에 CCTV가 있는 민원
+    if show_complaints:
+        for _, row in filtered[filtered["취약지점여부"]==0].dropna(subset=["lat","lng"]).iterrows():
+            folium.CircleMarker(
+                location=[row["lat"], row["lng"]],
+                radius=6, color="#ffa64d", fill=True, fill_opacity=0.8,
+                popup=f"<b>민원</b><br>{row.get('위반장소','')}<br>{row.get('위반일자','')}",
+            ).add_to(m)
+
+    # ④ 취약 지점: 반경 기준 안에 CCTV가 없는 사각지대 민원
+    if show_vulnerable:
+        for _, row in vulnerable.dropna(subset=["lat","lng"]).iterrows():
+            folium.CircleMarker(
+                location=[row["lat"], row["lng"]],
+                radius=10, color="#ff4b4b", fill=True, fill_opacity=0.9,
+                popup=(f"<b>⚠️ 사각지대</b><br>{row.get('위반장소','')}<br>"
+                       f"{row.get('위반일자','')}<br>최근접 CCTV: {row.get('최근접CCTV거리(m)','')}m"),
+            ).add_to(m)
+
+    folium.LayerControl().add_to(m)
+    st_folium(m, width="100%", height=560, returned_objects=[])
+
+
+# ════ TAB 4: CCTV 설치 시뮬레이션 ════
+with tab4:
+    st.markdown("### 4) CCTV 설치 시뮬레이션 — 몇 대를 어디에 두면 얼마나 줄어드는가")
+    st.caption('발표 포인트: 슬라이더를 움직이며 "CCTV 5대만 추가해도 사각지대 민원의 일정 비율을 해소할 수 있다"는 메시지를 강조하세요.')
     st.markdown("취약 지점에 CCTV를 설치했을 때 **커버 가능한 민원 건수**를 추정합니다.")
 
     sim_radius = st.slider("신규 CCTV 커버 반경 (m)", 50, 200, 100, step=10, key="sim")
@@ -271,6 +290,7 @@ with tab3:
 
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown("#### 신규 CCTV 설치 권장 위치")
+    st.caption("취약 민원을 많이 덮는 위치부터 우선순위로 제안합니다.")
 
     m3 = folium.Map(location=[35.18, 128.10], zoom_start=13, tiles="CartoDB dark_matter")
     for _, row in vuln_valid.iterrows():
@@ -287,19 +307,9 @@ with tab3:
     st_folium(m3, width="100%", height=460, returned_objects=[])
 
     st.markdown("#### 📋 CCTV 설치 우선순위 목록")
+    st.caption("발표 마지막 결론에서 바로 정책 제안 표로 활용할 수 있습니다.")
     if not sim_df.empty:
         sd = sim_df.copy(); sd.index = range(1, len(sd)+1); sd.index.name="우선순위"
         st.dataframe(sd[["주소","커버건수","lat","lng"]].rename(
             columns={"커버건수":"커버 가능 민원 수","lat":"위도","lng":"경도"}), use_container_width=True)
 
-# ════ TAB 4: 목록 ════
-with tab4:
-    st.markdown(f"### ⚠️ 취약 지점 목록 — 반경 {radius}m 내 CCTV 없는 민원 지점")
-    vd = vulnerable[["위반장소","읍면동","위반일자","최근접CCTV거리(m)"]].copy()
-    vd = vd.sort_values("최근접CCTV거리(m)", ascending=False).reset_index(drop=True)
-    vd.index += 1; vd.columns = ["주소","읍면동","위반일자","최근접CCTV거리(m)"]
-    st.dataframe(vd, use_container_width=True, height=500)
-    st.markdown(f"**총 {len(vd)}건**")
-    csv = vd.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
-    st.download_button(label="CSV 다운로드", data=csv,
-                       file_name="vulnerable_spots_export.csv", mime="text/csv")
